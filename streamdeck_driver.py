@@ -36,6 +36,7 @@ def save_persistent_vars(data):
 
 def applescript_escape_string(s):
     return s.replace('\\', '\\\\').replace('"', '\\"')
+
 def execute_applescript_dialog(prompt_message, default_answer=""):
     default_answer_literal = json.dumps(default_answer)
     script = f'''
