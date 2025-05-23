@@ -242,9 +242,12 @@ def run_cmd_in_terminal(main_command_to_run, # The N button's command, or regula
                     set new_terminal_entity to do script "" -- Create with empty command if needed
                 end if
                 delay 0.3
-                if class of new_terminal_entity is tab then set target_window to window of new_terminal_entity
-                else if class of new_terminal_entity is window then set target_window to new_terminal_entity
-                else set target_window to front window
+                if class of new_terminal_entity is tab then
+                    set target_window to window of new_terminal_entity
+                else if class of new_terminal_entity is window then
+                    set target_window to new_terminal_entity
+                else
+                    set target_window to front window
                 end if
             end if
             
