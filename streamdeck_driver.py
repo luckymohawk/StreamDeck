@@ -8,10 +8,29 @@ import re
 import json
 from pathlib import Path
 from math import ceil
-from StreamDeck.DeviceManager import DeviceManager
-from StreamDeck.Transport.Transport import TransportError
-from StreamDeck.ImageHelpers import PILHelper
-from PIL import Image, ImageDraw, ImageFont
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except ImportError as e:
+    Image = ImageDraw = ImageFont = None
+    print(f"[WARNING] Pillow library missing: {e}")
+
+try:
+    from StreamDeck.DeviceManager import DeviceManager
+    from StreamDeck.Transport.Transport import TransportError
+    from StreamDeck.ImageHelpers import PILHelper
+except ImportError as e:
+    DeviceManager = None
+    class TransportError(Exception):
+        pass
+    class DummyPILHelper:
+        @staticmethod
+        def create_image(deck):
+            return Image.new('RGB', deck.key_image_format()['size']) if Image else None
+        @staticmethod
+        def to_native_format(deck, img):
+            return img
+    PILHelper = DummyPILHelper
+    print(f"[WARNING] StreamDeck library missing: {e}")
 
 # === Application Directories & Files ===
 APP_DIR = Path.home() / "Library" / "StreamDeckDriver"
@@ -312,6 +331,10 @@ def run_cmd_in_terminal(main_command_to_run, # The N button's command, or regula
 if __name__ == "__main__":
     # ... (Initial setup as before) ...
     print("[INFO] Initializing Stream Deck Driver...")
+
+    if DeviceManager is None or Image is None:
+        print("[ERROR] Required libraries not available. Exiting.")
+        sys.exit(1)
     persistent_vars = load_persistent_vars()
     items = []
     try:
@@ -468,7 +491,7 @@ if __name__ == "__main__":
                     redraw(); return
                 else: # Execute command, routed to active @ device or default
                     target_title = labels.get(active_device_key) if active_device_key is not None else None
-                    run_cmd_in_terminal(processed_cmd_str, target_window_title=target_title)
+                    run_cmd_in_terminal(processed_cmd_str, active_at_device_label_to_target=target_title)
                     return
             else: # LONG PRESS on '#'
                 print(f"[DEBUG] LONG press on # button {k_idx}. Entering numeric adjust.")
@@ -506,7 +529,7 @@ if __name__ == "__main__":
                     cmd_to_run_num_adj = cmd_to_run_num_adj.replace(m_sub.group(0), str(persistent_vars.get(m_sub.group(1), m_sub.group(2) or "")))
             print(f"[DEBUG] Numeric inc/dec. Key: {k_idx}, Var: {var_name_exact_numeric}, Val: {new_value}, Cmd: '{cmd_to_run_num_adj}'")
             target_terminal_title_num_adj = labels.get(active_device_key) if active_device_key is not None else None
-            run_cmd_in_terminal(cmd_to_run_num_adj, target_window_title=target_terminal_title_num_adj)
+            run_cmd_in_terminal(cmd_to_run_num_adj, active_at_device_label_to_target=target_terminal_title_num_adj)
             redraw(); return
 
         # 3. @ Device Button Press
@@ -523,14 +546,10 @@ if __name__ == "__main__":
                 toggle_keys.add(k_idx)
                 print(f"[DEBUG] Device {k_idx} ('{labels.get(k_idx)}') toggled ON. Executing its command: '{processed_cmd_str}'")
                 
-                r,g,b = hex_to_aps(bg_color_val_cb) # Use actual color values
-                tc_name = text_color(bg_color_val_cb)
-                device_appearance_config = {"lbl": labels.get(k_idx), "r":r,"g":g,"b":b, "text_color_name": tc_name}
-                
-                run_cmd_in_terminal(main_command_to_run=processed_cmd_str, # This is the @-button's own command
-                                    button_label_for_new_window_title=labels.get(k_idx), # It creates/targets its own title
+                run_cmd_in_terminal(main_command_to_run=processed_cmd_str,  # This is the @-button's own command
+                                    button_label_for_new_window_title=labels.get(k_idx),  # It creates/targets its own title
                                     button_bg_color_hex_for_new_window=bg_color_val_cb,
-                                    is_activating_at_device=True) # Special flag for this case
+                                    is_activating_at_device=True)  # Special flag for this case
             
             if lp_numeric_active_before:
                 print("[DEBUG] Exiting numeric mode (LP) due to @ press.")
@@ -584,32 +603,32 @@ if __name__ == "__main__":
 
         print(f"[DEBUG] Final Execution Path for key {k_idx}. CMD: '{processed_cmd_str}'")
         
-        final_target_title_for_run = None
-        final_new_window_cfg_for_run = None
-        final_prepend_cmd_for_run = ""
-
-        if nw_flag_cb: # N-flag button
+        if nw_flag_cb:
             print(f"[DEBUG] N-Flag button {k_idx} routing.")
-            r_aps,g_aps,b_aps = hex_to_aps(bg_color_val_cb) # Use actual color values for N window
-            tc_name = text_color(bg_color_val_cb)
-            final_new_window_cfg_for_run = {"lbl": labels.get(k_idx, "New Window"), "r":r_aps,"g":g_aps,"b":b_aps, "text_color_name": tc_name}
+            prepend_cmd = ""
             if active_device_key is not None:
                 active_dev_cmd_orig = cmds.get(active_device_key, "")
-                # Substitute vars in active @ device's command
-                final_prepend_cmd_for_run = active_dev_cmd_orig
-                for m_dev_sub in VAR_PATTERN.finditer(final_prepend_cmd_for_run):
-                    ph_s,vn_s,vd_s = m_dev_sub.group(0),m_dev_sub.group(1),m_dev_sub.group(2) or ""
-                    final_prepend_cmd_for_run = final_prepend_cmd_for_run.replace(ph_s, str(persistent_vars.get(vn_s, vd_s)))
-                print(f"[DEBUG] N-Flag will prepend active @ device cmd: {final_prepend_cmd_for_run}")
-        elif active_device_key is not None: # Regular command, route to active @ device
-            final_target_title_for_run = labels.get(active_device_key)
-            print(f"[DEBUG] Regular cmd, targeting active @ device: {final_target_title_for_run}")
-        # Else (no N, no @ active): target_title and new_window_cfg remain None, handled by run_cmd_in_terminal default.
-        
-        run_cmd_in_terminal(main_command_to_run=processed_cmd_str,
-                            target_window_title=final_target_title_for_run,
-                            new_window_appearance_cfg=final_new_window_cfg_for_run,
-                            prepend_command=final_prepend_cmd_for_run)
+                prepend_cmd = active_dev_cmd_orig
+                for m_dev_sub in VAR_PATTERN.finditer(prepend_cmd):
+                    ph_s, vn_s, vd_s = m_dev_sub.group(0), m_dev_sub.group(1), m_dev_sub.group(2) or ""
+                    prepend_cmd = prepend_cmd.replace(ph_s, str(persistent_vars.get(vn_s, vd_s)))
+                print(f"[DEBUG] N-Flag will prepend active @ device cmd: {prepend_cmd}")
+
+            run_cmd_in_terminal(
+                main_command_to_run=processed_cmd_str,
+                button_label_for_new_window_title=labels.get(k_idx, "New Window"),
+                button_bg_color_hex_for_new_window=bg_color_val_cb,
+                at_device_own_command=prepend_cmd
+            )
+        elif active_device_key is not None:
+            target_title = labels.get(active_device_key)
+            print(f"[DEBUG] Regular cmd, targeting active @ device: {target_title}")
+            run_cmd_in_terminal(
+                main_command_to_run=processed_cmd_str,
+                active_at_device_label_to_target=target_title
+            )
+        else:
+            run_cmd_in_terminal(main_command_to_run=processed_cmd_str)
         
         if needs_redraw_after_action: redraw() # If numeric mode was exited just before this.
 
