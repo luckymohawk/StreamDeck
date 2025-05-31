@@ -37,7 +37,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV="/Users/kevinbrueckman/Library/StreamdeckDriver/venv"
+VIRTUAL_ENV="/Users/luckymcnulty/Library/StreamdeckDriver/venv"
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"

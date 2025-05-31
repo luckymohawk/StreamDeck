@@ -1,4 +1,4 @@
-#!/Users/kevinbrueckman/Library/StreamdeckDriver/venv/bin/python3
+#!/Users/luckymcnulty/Library/StreamdeckDriver/venv/bin/python
 # -*- coding: utf-8 -*-
 import re
 import sys

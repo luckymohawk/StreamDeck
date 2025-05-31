@@ -34,7 +34,7 @@ def sanitize_var_name(original_name_part: str) -> str:
         s_name = re.sub(r"_+", "_", s_name); s_name = s_name.strip("_")
         if not s_name: return "V_EMPTY"
     if not CLEAN_VAR_NAME_EXPECTED_FORMAT.match(s_name):
-        print(f"    --> Sanitized name '{s_name}' still does not perfectly match CLEAN_VAR_NAME_EXPECTED_FORMAT.")
+        print(f"    --> Sanitized name '{s_name}' still does not perfectly match CLEAN_VAR_NAME_EXPECTED_FORMAT (original: '{original_name_part}').")
         if s_name == "V_": s_name = "VAR_V_ONLY"
     return s_name
 
@@ -45,18 +45,17 @@ def validate_command_placeholders(command_str: str) -> str:
         if not match: break
         original_name_part = match.group(2).strip()
         colon_part = match.group(3)
-        default_value_part = match.group(4)
 
-        if not original_name_part: return f"ERR: Empty var name in '{match.group(0)}'"
+        if not original_name_part: return f"ERR: Empty var name in placeholder '{match.group(0)}'"
         
         if not CLEAN_VAR_NAME_EXPECTED_FORMAT.match(original_name_part):
             sanitized_for_check = sanitize_var_name(original_name_part)
             if CLEAN_VAR_NAME_EXPECTED_FORMAT.match(sanitized_for_check):
-                 return f"WARN: Var '{original_name_part}' needs sanitization to '{sanitized_for_check}' in '{match.group(0)}'"
-            return f"ERR: Invalid var name format '{original_name_part}' in '{match.group(0)}'"
+                 return f"WARN: Var '{original_name_part}' needs sanitization to '{sanitized_for_check}' in placeholder '{match.group(0)}'"
+            return f"ERR: Invalid var name format '{original_name_part}' (unsanitizable) in placeholder '{match.group(0)}'"
         
-        if colon_part and default_value_part is None:
-            return f"ERR: Var '{original_name_part}' has colon but no default value in '{match.group(0)}'"
+        if not colon_part:
+            return f"ERR: Var '{original_name_part}' in '{match.group(0)}' must have a default value (e.g., '{{{{{original_name_part}:YOUR_DEFAULT}}}}' or '{{{{{original_name_part}:}}}}' for empty default)."
             
         offset = match.end(0)
     return "OK"
@@ -95,7 +94,7 @@ def run_applescript(script_text: str) -> str:
             is_actual_error_for_log = p.returncode != 0 or \
                                    any(err_indicator in err.lower() for err_indicator in ["syntax error", "error:", "(-"]) or \
                                    "execution error" in err.lower()
-            if is_actual_error_for_log: # Only print full script if a real error seems likely
+            if is_actual_error_for_log:
                 print(f"--- AppleScript Start (Error Detected by Python) ---\n{script_text}\n--- AppleScript End ---", file=sys.stderr)
 
         if err and ("error" in err.lower() or "(-" in err):
@@ -116,80 +115,9 @@ def run_applescript(script_text: str) -> str:
         print("Error: 'osascript' command not found. Please ensure it's in your PATH.", file=sys.stderr)
         sys.exit(1)
 
-def run_applescript_for_batched_writeback(list_of_tuples_for_as: list, column_to_write: str):
-    """
-    Generates and executes an AppleScript to write data to Numbers.
-    Each item in list_of_tuples_for_as is a (row_idx_str, val_str) tuple.
-    The AppleScript will execute a series of 'set value' commands.
-    """
-    applescript_set_value_commands_list = []
-    for r_idx_str, val_str in list_of_tuples_for_as:
-        escaped_val = json.dumps(val_str)
-        # Create a command to set the cell value for each item
-        # Ensure row index is treated as a number in AppleScript
-        command = f'set value of cell {r_idx_str} of column "{column_to_write}" to {escaped_val}'
-        applescript_set_value_commands_list.append(command)
-    
-    # Join all individual set value commands into one block, separated by newlines
-    all_set_commands_string = "\n                        ".join(applescript_set_value_commands_list)
-
-    final_script = clean_applescript_template(f"""
-    tell application "Numbers"
-        activate
-        tell front document
-            set target_sheet to missing value
-            try
-                repeat with s_item in sheets
-                    if name of s_item is "Streamdeck" then
-                        set target_sheet to s_item
-                        exit repeat
-                    end if
-                end repeat
-            on error
-                log "Error accessing sheets for writeback."
-                return "Error: Could not access sheets for writeback."
-            end try
-
-            if target_sheet is missing value then
-                try
-                    set target_sheet to active sheet
-                on error
-                    log "Error setting target_sheet to active sheet for writeback."
-                    return "Error: Could not set active sheet for writeback."
-                end try
-            end if
-            
-            tell target_sheet to tell table 1 of it
-                -- Conditional header for validation status column (Column K)
-                if "{column_to_write}" is "K" then
-                    try
-                        set current_header to value of cell 1 of column "K"
-                        if current_header is not "Var Format Check" then
-                            set value of cell 1 of column "K" to "Var Format Check"
-                        end if
-                    on error 
-                        set value of cell 1 of column "K" to "Var Format Check"
-                    end try
-                end if
-                
-                try
-                    {all_set_commands_string}
-                on error errMsg
-                    log "Error during batch cell update for Col {column_to_write}: " & errMsg
-                    -- Optionally re-raise or handle partial success/failure
-                end try
-            end tell
-        end tell
-    end tell
-    return "Writeback to Col {column_to_write} attempted."
-    """)
-    
-    return run_applescript(final_script)
-
-
 FETCH_APPLESCRIPT_TEMPLATE = clean_applescript_template("""
 tell application "Numbers"
-    activate
+    activate 
     tell front document
         set target_sheet to missing value
         try
@@ -204,9 +132,6 @@ tell application "Numbers"
         end try
 
         if target_sheet is missing value then
-            try
-                display dialog "Sheet 'Streamdeck' not found. Using active sheet." with icon note buttons {"OK"} default button "OK" giving up after 3
-            end try
             set target_sheet to active sheet
         end if
 
@@ -251,6 +176,13 @@ def create_database_from_numbers(db_path_param='streamdeck.db'):
     if db_dir and not os.path.exists(db_dir):
         os.makedirs(db_dir)
 
+    if os.path.exists(db_path_param):
+        try:
+            os.remove(db_path_param)
+            print(f"Removed existing database '{db_path_param}' for fresh build.")
+        except OSError as e:
+            print(f"Error removing existing database '{db_path_param}': {e}", file=sys.stderr)
+            
     conn = sqlite3.connect(db_path_param)
     c = conn.cursor()
 
@@ -273,10 +205,8 @@ def create_database_from_numbers(db_path_param='streamdeck.db'):
             rows_data_cleaned.append(cleaned_row_str)
     
     entries_for_sqlite = []
-    commands_to_write_back_if_corrected = []
-    validation_statuses_for_numbers = []
 
-    print("Validating and processing commands from Numbers data...")
+    print("Validating and processing commands from Numbers data for SQLite...")
     for row_entry_str in rows_data_cleaned:
         parts = row_entry_str.split(chr(31))
         if len(parts) < 4:
@@ -293,32 +223,17 @@ def create_database_from_numbers(db_path_param='streamdeck.db'):
             continue
         
         validation_result = validate_command_placeholders(original_cmd_val)
-        validation_statuses_for_numbers.append((row_idx_str, validation_result))
         if validation_result != "OK":
-            print(f"    Validation for row {row_idx_str} (Label: '{label_val}', Cmd: '{original_cmd_val}'): {validation_result}")
+            print(f"    VALIDATION for Numbers row original index {row_idx_str} (Label: '{label_val}', Cmd: '{original_cmd_val}'): {validation_result}")
         
         cmd_for_sqlite, was_cmd_structurally_corrected = correct_command_string_for_sqlite(original_cmd_val)
         if was_cmd_structurally_corrected:
-            print(f"    Sanitized command for row {row_idx_str} (Label: '{label_val}') for DB. Original: '{original_cmd_val}', Sanitized: '{cmd_for_sqlite}'")
-            commands_to_write_back_if_corrected.append((row_idx_str, cmd_for_sqlite))
+            print(f"    Sanitized variable name(s) in command for row {row_idx_str} (Label: '{label_val}') for DB. Original: '{original_cmd_val}', DB version: '{cmd_for_sqlite}'")
+        
+        label_db = "" if label_val.lower() == "missing value" else label_val
+        flags_db = "" if flags_val.lower() == "missing value" else flags_val
 
-        entries_for_sqlite.append((label_val, cmd_for_sqlite, flags_val))
-
-    if commands_to_write_back_if_corrected:
-        print(f"Writing {len(commands_to_write_back_if_corrected)} structurally corrected commands back to Numbers (Col D)...")
-        try:
-            run_applescript_for_batched_writeback(commands_to_write_back_if_corrected, "D")
-            print("  Successfully attempted to write structurally corrected commands to Numbers Col D.")
-        except Exception as e_corr_write:
-            print(f"  Error writing corrected commands to Numbers Col D: {e_corr_write}", file=sys.stderr)
-
-    if validation_statuses_for_numbers:
-        print(f"Writing {len(validation_statuses_for_numbers)} validation statuses to Numbers (Col K)...")
-        try:
-            run_applescript_for_batched_writeback(validation_statuses_for_numbers, "K")
-            print("  Successfully attempted to write validation statuses to Numbers column K.")
-        except Exception as e_val_write_k:
-            print(f"  Error writing validation statuses data to Numbers: {e_val_write_k}", file=sys.stderr)
+        entries_for_sqlite.append((label_db, cmd_for_sqlite, flags_db))
 
     if entries_for_sqlite:
         c.executemany("INSERT INTO streamdeck (label, command, newwin) VALUES (?, ?, ?)", entries_for_sqlite)
@@ -331,7 +246,7 @@ def create_database_from_numbers(db_path_param='streamdeck.db'):
 
 if __name__ == "__main__":
     db_file_path = sys.argv[1] if len(sys.argv) > 1 else str(APP_DIR / "streamdeck.db")
-    print(f"Target database path: {db_file_path}")
+    print(f"Target database path (will be rebuilt): {db_file_path}")
     try:
         create_database_from_numbers(db_file_path)
     except Exception as e_main:
