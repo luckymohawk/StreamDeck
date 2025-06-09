@@ -12,75 +12,27 @@ from math import ceil
 APP_DIR = Path.home() / "Library" / "StreamDeckDriver"
 
 # === Regex Patterns (Centralized) ===
-VAR_PLACEHOLDER_PATTERN = re.compile(r"(\{\{)([^:}]+)([:]?)([^}]*)?(\}\})")
-CLEAN_VAR_NAME_EXPECTED_FORMAT = re.compile(r"^[A-Z][A-Z0-9_]*$")
-INVALID_CHARS_IN_NAME_REGEX = re.compile(r"[\s\-.!?,;:(){}\[\]<>+*/%='\"`~@$&|]+")
-LEADING_INVALID_CHARS_REGEX = re.compile(r"^[^A-Z_]")
+# This pattern is now flexible, matching what the main driver uses.
+VAR_PLACEHOLDER_PATTERN = re.compile(r"\{\{([^:}]+)(:([^}]*))?\}\}")
 
 # === Helper function to clean AppleScript templates ===
 def clean_applescript_template(template_string: str) -> str:
     """Strips trailing whitespace from each line and leading/trailing newlines from the block."""
     return "\n".join([line.rstrip() for line in template_string.strip().splitlines()])
 
-def sanitize_var_name(original_name_part: str) -> str:
-    s_name = original_name_part.strip()
-    s_name = INVALID_CHARS_IN_NAME_REGEX.sub("_", s_name)
-    s_name = s_name.upper()
-    s_name = re.sub(r"_+", "_", s_name)
-    s_name = s_name.strip("_")
-    if not s_name: return "VAR_EMPTY"
-    if LEADING_INVALID_CHARS_REGEX.match(s_name) and not s_name.startswith("V_"):
-        s_name = "V_" + s_name
-        s_name = re.sub(r"_+", "_", s_name); s_name = s_name.strip("_")
-        if not s_name: return "V_EMPTY"
-    if not CLEAN_VAR_NAME_EXPECTED_FORMAT.match(s_name):
-        if not s_name.startswith("V_") and LEADING_INVALID_CHARS_REGEX.match(s_name):
-             print(f"    --> Sanitized name '{s_name}' might still have leading non-alpha chars (original: '{original_name_part}').")
-    return s_name
-
-
 def validate_command_placeholders(command_str: str) -> str:
-    offset = 0
-    while True:
-        match = VAR_PLACEHOLDER_PATTERN.search(command_str, offset)
-        if not match: break
-        original_name_part = match.group(2).strip()
-        colon_part = match.group(3)
-
-        if not original_name_part: return f"ERR: Empty var name in placeholder '{match.group(0)}'"
-        
-        if not CLEAN_VAR_NAME_EXPECTED_FORMAT.match(original_name_part):
-            sanitized_for_check = sanitize_var_name(original_name_part)
-            if CLEAN_VAR_NAME_EXPECTED_FORMAT.match(sanitized_for_check):
-                 return f"WARN: Var '{original_name_part}' needs sanitization to '{sanitized_for_check}' in placeholder '{match.group(0)}'"
-            return f"ERR: Invalid var name format '{original_name_part}' (unsanitizable) in placeholder '{match.group(0)}'"
-        
-        if not colon_part:
-            return f"ERR: Var '{original_name_part}' in '{match.group(0)}' must have a default value (e.g., '{{{{{original_name_part}:YOUR_DEFAULT}}}}' or '{{{{{original_name_part}:}}}}' for empty default)."
-            
-        offset = match.end(0)
+    """
+    (Corrected) This validation is relaxed to allow all command strings through,
+    restoring the old behavior. The main driver is responsible for parsing.
+    """
     return "OK"
 
 def correct_command_string_for_sqlite(original_cmd_str: str):
-    corrected_cmd = original_cmd_str
-    was_corrected_flag = False
-    
-    def replace_and_sanitize_match(match_obj):
-        nonlocal was_corrected_flag
-        opening_braces, var_name_original_raw, colon_part, default_val_part, closing_braces = match_obj.groups()
-        
-        var_name_stripped = var_name_original_raw.strip()
-        sanitized_name = sanitize_var_name(var_name_stripped)
-        
-        if var_name_stripped != sanitized_name:
-            was_corrected_flag = True
-            
-        default_val_part = default_val_part if default_val_part is not None else ""
-        
-        return f"{opening_braces}{sanitized_name}{colon_part}{default_val_part}{closing_braces}"
-
-    corrected_cmd = VAR_PLACEHOLDER_PATTERN.sub(replace_and_sanitize_match, original_cmd_str)
-    return corrected_cmd, was_corrected_flag
+    """
+    (Corrected) This function no longer sanitizes or alters the command string.
+    It returns the original string to be stored in the database as-is.
+    """
+    return original_cmd_str, False
 
 
 def run_applescript(script_text: str) -> str:
@@ -214,7 +166,7 @@ def create_database_from_numbers(db_path_param='streamdeck.db'):
     
     entries_for_sqlite = []
 
-    print("Validating and processing commands from Numbers data for SQLite...")
+    print("Processing commands from Numbers data for SQLite...")
     for row_entry_str in rows_data_cleaned:
         parts = row_entry_str.split(chr(31)) # US (Unit Separator)
         # Expecting 5 parts: index, label, command, flags, monitor_keyword
@@ -232,13 +184,8 @@ def create_database_from_numbers(db_path_param='streamdeck.db'):
             print(f"  Skipping row with non-numeric index: '{row_idx_str}' from entry '{row_entry_str}'")
             continue
         
-        validation_result = validate_command_placeholders(original_cmd_val)
-        if validation_result != "OK":
-            print(f"    VALIDATION for Numbers row original index {row_idx_str} (Label: '{label_val}', Cmd: '{original_cmd_val}'): {validation_result}")
-        
-        cmd_for_sqlite, was_cmd_structurally_corrected = correct_command_string_for_sqlite(original_cmd_val)
-        if was_cmd_structurally_corrected:
-            print(f"    Sanitized variable name(s) in command for row {row_idx_str} (Label: '{label_val}') for DB. Original: '{original_cmd_val}', DB version: '{cmd_for_sqlite}'")
+        # Pass command through without validation or correction
+        cmd_for_sqlite, _ = correct_command_string_for_sqlite(original_cmd_val)
         
         label_db = "" if label_val.lower() == "missing value" else label_val
         flags_db = "" if flags_val.lower() == "missing value" else flags_val.strip()
@@ -267,7 +214,3 @@ if __name__ == "__main__":
         print(f"An error occurred during database creation: {e_main}", file=sys.stderr)
         import traceback
         traceback.print_exc(file=sys.stderr)
-
-if not APP_DIR.exists(): # Redundant if APP_DIR is created in main, but harmless
-    APP_DIR.mkdir(parents=True, exist_ok=True)
-print("streamdeck_db.py corrected to fetch monitor keyword from Column K.")
