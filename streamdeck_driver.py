@@ -152,10 +152,11 @@ def get_items():
 
 def parse_flags(flags_str):
     f = (flags_str or "").strip().upper()
-    if not f or f == 'MISSING VALUE': return False, False, False, BASE_COLORS['K'], DEFAULT_FONT_SIZE, False, False
+    if not f or f == 'MISSING VALUE': return False, False, False, BASE_COLORS['K'], DEFAULT_FONT_SIZE, False, False, False
     new_win, device, sticky = 'N' in f, '@' in f, 'T' in f or '@' in f
     font_size = int(m.group(1)) if (m := re.search(r"(\d+)", f)) else DEFAULT_FONT_SIZE
     force_local_execution, is_mobile_ssh_flag = 'K' in f, 'M' in f
+    is_osa_monitor_flag = '?' in f
     base_color_char_for_display = 'K'
     non_k_color_found = False
     color_priority_chars = [c for c in BASE_COLORS.keys() if c != 'K']
@@ -166,7 +167,7 @@ def parse_flags(flags_str):
     if 'D' in f and base_color_char_for_display != 'K':
         try: col = f"#{''.join(f'{int(col[i:i+2],16)//2:02X}' for i in (1,3,5))}"
         except: pass
-    return new_win, device, sticky, col, font_size, force_local_execution, is_mobile_ssh_flag
+    return new_win, device, sticky, col, font_size, force_local_execution, is_mobile_ssh_flag, is_osa_monitor_flag
 
 def text_color(bg_hex):
     if not bg_hex or len(bg_hex) < 6: return 'white'
@@ -253,44 +254,96 @@ def render_key(label_text, deck_ref, bg_hex_val, font_size_val, txt_override_col
         draw.text(((W - (extra_bbox[2] - extra_bbox[0])) / 2, H - (extra_bbox[3] - extra_bbox[1]) - 5), extra_text, font=font_extra, fill=final_text_color, anchor="lt" if hasattr(draw, 'textbbox') else None)
     return PILHelper.to_native_format(deck_ref,img)
 
-def run_cmd_in_terminal(main_cmd, is_at_act=False, at_has_n=False, btn_style_cfg=None, act_at_lbl=None, is_n_staged=False, ssh_staged="", n_staged="", prepend="", force_new_win_at=False, force_local_execution=False):
+def run_cmd_in_terminal(main_cmd, is_at_act=False, at_has_n=False, btn_style_cfg=None, act_at_lbl=None, is_n_staged=False, ssh_staged="", n_staged="", prepend="", force_new_win_at=False, force_local_execution=False, script_template_override=None, ssh_cmd_to_keystroke=None, actual_cmd_to_keystroke=None):
     eff_cmd = f"{prepend}\n{main_cmd.strip()}" if prepend and main_cmd.strip() else (prepend or main_cmd.strip())
     eff_cmd = eff_cmd.replace('“','"').replace('”','"')
     esc_cmd = applescript_escape_string(eff_cmd)
     as_script, script_vars = "", {}
-    tpl_map = {"n_staged":"terminal_n_for_at_staged_keystroke.applescript", "at_n":"terminal_activate_new_styled_at_n.applescript", "at_only":"terminal_activate_found_at_only.applescript", "n_alone":"terminal_activate_standalone_n.applescript", "to_active_at":"terminal_command_to_active_at_device.applescript", "default":"terminal_do_script_default.applescript", "force_local_new_window": "terminal_force_new_window_and_do_script.applescript"}
-    if force_local_execution:
-        if eff_cmd: script_vars['final_script_payload_for_do_script'] = esc_cmd; as_script = load_applescript_template(tpl_map["force_local_new_window"], **script_vars)
-        else: return
-    else:
-        is_cmd_to_act_at = act_at_lbl and not is_at_act and not (btn_style_cfg and btn_style_cfg.get('is_standalone_n_button',False)) and not is_n_staged
-        if not eff_cmd and not is_at_act and not is_cmd_to_act_at and not (is_n_staged and ssh_staged): return
-        if is_n_staged:
-            if not btn_style_cfg or not ssh_staged: print(f"[ERR] N-Staged missing info"); return
-            script_vars.update({'window_custom_title': applescript_escape_string(btn_style_cfg.get('lbl','N-Staged Window')), 'aps_bg_color': hex_to_aps_color_values_str(btn_style_cfg.get('bg_hex', BASE_COLORS['K'])), 'aps_text_color': "{65535,65535,65535}" if btn_style_cfg.get('text_color_name','white')=='white' else "{0,0,0}", 'ssh_command_to_keystroke': applescript_escape_string(ssh_staged), 'actual_n_command_to_keystroke': applescript_escape_string(n_staged)})
-            as_script = load_applescript_template(tpl_map["n_staged"], **script_vars)
-        elif is_at_act:
-            if not btn_style_cfg or 'lbl' not in btn_style_cfg:
-                if eff_cmd: script_vars['final_script_payload_for_do_script']=esc_cmd; as_script=load_applescript_template(tpl_map["default"],**script_vars)
-                else: return
+    
+    tpl_map = {
+        "spawn_ssh_and_snapshot": "terminal_spawn_ssh_and_snapshot.applescript",
+        "spawn_and_snapshot": "terminal_spawn_and_snapshot.applescript",
+        "n_staged": "terminal_n_for_at_staged_keystroke.applescript",
+        "at_n": "terminal_activate_new_styled_at_n.applescript",
+        "at_only": "terminal_activate_found_at_only.applescript",
+        "n_alone": "terminal_activate_standalone_n.applescript",
+        "to_active_at": "terminal_command_to_active_at_device.applescript",
+        "default": "terminal_do_script_default.applescript",
+        "force_local_new_window": "terminal_force_new_window_and_do_script.applescript"
+    }
+
+    template_key = "default"
+    if script_template_override and script_template_override in tpl_map:
+        template_key = script_template_override
+    elif force_local_execution:
+        template_key = "force_local_new_window"
+    elif is_n_staged:
+        template_key = "n_staged"
+    elif is_at_act:
+        template_key = "at_n" if at_has_n else "at_only"
+    elif btn_style_cfg and btn_style_cfg.get('is_standalone_n_button', False):
+        template_key = "n_alone"
+    elif act_at_lbl and not is_at_act:
+        template_key = "to_active_at"
+    
+    if template_key == "spawn_ssh_and_snapshot":
+        if not btn_style_cfg or not ssh_cmd_to_keystroke: return None
+        script_vars = {
+            'window_custom_title': applescript_escape_string(btn_style_cfg.get('lbl', 'Monitor Window')),
+            'aps_bg_color': hex_to_aps_color_values_str(btn_style_cfg.get('bg_hex', BASE_COLORS['B'])),
+            'aps_text_color': "{65535,65535,65535}" if btn_style_cfg.get('text_color_name', 'white') == 'white' else "{0,0,0}",
+            'ssh_command_to_keystroke': applescript_escape_string(ssh_cmd_to_keystroke),
+            'actual_command_to_keystroke': applescript_escape_string(actual_cmd_to_keystroke or "")
+        }
+    elif template_key == "spawn_and_snapshot":
+        if not btn_style_cfg: return None
+        script_vars = {
+            'window_custom_title': applescript_escape_string(btn_style_cfg.get('lbl', 'Monitor Window')),
+            'aps_bg_color': hex_to_aps_color_values_str(btn_style_cfg.get('bg_hex', BASE_COLORS['B'])),
+            'aps_text_color': "{65535,65535,65535}" if btn_style_cfg.get('text_color_name', 'white') == 'white' else "{0,0,0}",
+            'initial_command_to_run': esc_cmd
+        }
+    elif template_key in ["at_n", "at_only"]:
+        if not btn_style_cfg or 'lbl' not in btn_style_cfg:
+            script_vars['final_script_payload_for_do_script'] = esc_cmd
+            template_key = "default"
+        else:
+            dev_lbl = btn_style_cfg['lbl']
+            script_vars.update({
+                'escaped_device_label': applescript_escape_string(dev_lbl),
+                'aps_bg_color': hex_to_aps_color_values_str(btn_style_cfg.get('bg_hex', BASE_COLORS['K'])),
+                'aps_text_color': "{65535,65535,65535}" if btn_style_cfg.get('text_color_name', 'white') == 'white' else "{0,0,0}"
+            })
+            if template_key == "at_n":
+                script_vars['final_script_payload'] = esc_cmd
             else:
-                dev_lbl = btn_style_cfg['lbl']; script_vars.update({'escaped_device_label': applescript_escape_string(dev_lbl), 'aps_bg_color': hex_to_aps_color_values_str(btn_style_cfg.get('bg_hex', BASE_COLORS['K'])), 'aps_text_color': "{65535,65535,65535}" if btn_style_cfg.get('text_color_name','white')=='white' else "{0,0,0}"})
-                if at_has_n: script_vars['final_script_payload']=esc_cmd; as_script=load_applescript_template(tpl_map["at_n"],**script_vars)
-                else: script_vars['final_script_payload_for_do_script']=esc_cmd; script_vars['force_new_window']="true" if force_new_win_at else "false"; as_script=load_applescript_template(tpl_map["at_only"],**script_vars)
-        elif btn_style_cfg and btn_style_cfg.get('is_standalone_n_button',False):
-            cfg = btn_style_cfg; script_vars.update({'window_custom_title': applescript_escape_string(cfg.get('lbl', 'N Window')), 'aps_bg_color': hex_to_aps_color_values_str(cfg.get('bg_hex', BASE_COLORS['K'])), 'aps_text_color': "{65535,65535,65535}" if cfg.get('text_color_name','white')=='white' else "{0,0,0}", 'final_script_payload_for_do_script': esc_cmd}); as_script = load_applescript_template(tpl_map["n_alone"], **script_vars)
-        elif is_cmd_to_act_at:
-            script_vars.update({'safe_target_title': applescript_escape_string(act_at_lbl), 'final_script_payload_for_do_script': esc_cmd, 'main_command_raw_for_emptiness_check': esc_cmd, 'command_to_type_literally_content': esc_cmd});
-            as_script = load_applescript_template(tpl_map["to_active_at"],**script_vars)
-        elif eff_cmd: script_vars['final_script_payload_for_do_script']=esc_cmd; as_script=load_applescript_template(tpl_map["default"],**script_vars)
+                script_vars['final_script_payload_for_do_script'] = esc_cmd
+                script_vars['force_new_window'] = "true" if force_new_win_at else "false"
+    elif template_key in ["force_local_new_window", "n_alone", "default"]:
+        script_vars['final_script_payload_for_do_script'] = esc_cmd
+        if template_key == "n_alone" and btn_style_cfg:
+             script_vars.update({
+                'window_custom_title': applescript_escape_string(btn_style_cfg.get('lbl', 'N Window')),
+                'aps_bg_color': hex_to_aps_color_values_str(btn_style_cfg.get('bg_hex', BASE_COLORS['K'])),
+                'aps_text_color': "{65535,65535,65535}" if btn_style_cfg.get('text_color_name', 'white') == 'white' else "{0,0,0}"
+            })
+    elif template_key == "to_active_at":
+        script_vars = {'safe_target_title': applescript_escape_string(act_at_lbl), 'final_script_payload_for_do_script': esc_cmd, 'main_command_raw_for_emptiness_check': esc_cmd, 'command_to_type_literally_content': esc_cmd}
+    
+    if template_key:
+        as_script = load_applescript_template(tpl_map[template_key], **script_vars)
+
     if as_script:
         try:
             proc = subprocess.run(["osascript","-"],input=as_script,text=True,capture_output=True,check=False, timeout=15)
             stderr_lower = proc.stderr.lower().strip() if proc.stderr else ""
             if proc.returncode != 0 and "(-128)" not in stderr_lower and "(-1712)" not in stderr_lower:
                 print(f"[ERROR] AppleScript execution failed (RC:{proc.returncode}).", file=sys.stderr); print(f"  AS STDERR: {proc.stderr.strip()}", file=sys.stderr)
+            return proc.stdout.strip()
         except subprocess.TimeoutExpired: print(f"[ERROR] osascript call timed out for command: {main_cmd[:50]}...", file=sys.stderr)
         except Exception as e_as: print(f"[FATAL] Error running osascript: {e_as}", file=sys.stderr)
+    
+    return None
 
 def monitor_ssh(global_idx, ssh_cmd_base, generation_id):
     chk_cmd = f"{ssh_cmd_base} exit"
@@ -333,6 +386,38 @@ def monitor_remote_process(global_idx, ssh_base_cmd, unique_grep_tag, generation
             if monitor_generations.get(global_idx) != generation_id: break
             time.sleep(0.1)
         if monitor_generations.get(global_idx) != generation_id: break
+
+def monitor_window_snapshot(global_idx, window_id, initial_snapshot, keyword, generation_id):
+    snapshot_len = len(initial_snapshot)
+    
+    while global_idx in monitor_threads and monitor_generations.get(global_idx) == generation_id:
+        try:
+            script = load_applescript_template("get_window_content.applescript", window_id=window_id)
+            proc = subprocess.run(["osascript", "-"], input=script, text=True, capture_output=True, check=False, timeout=2)
+            current_content = proc.stdout.strip()
+
+            if monitor_generations.get(global_idx) != generation_id: break
+
+            if current_content == "WINDOW_GONE":
+                monitor_states[global_idx] = 'OSA_GONE'
+                monitor_generations[global_idx] = None
+                break
+            
+            if len(current_content) > snapshot_len:
+                new_text = current_content[snapshot_len:]
+                # --- FIX: Make comparison case-insensitive ---
+                if keyword.lower() in new_text.lower():
+                    monitor_states[global_idx] = 'OSA_FOUND'
+                    monitor_generations[global_idx] = None
+                    break
+
+        except Exception as e:
+            print(f"[ERROR] Snapshot Monitor thread failed: {e}")
+            monitor_states[global_idx] = 'OSA_ERROR'
+            monitor_generations[global_idx] = None
+            break
+        
+        time.sleep(30)
 
 # --- Database Interaction Functions for API ---
 def db_update_button(button_data):
@@ -430,7 +515,19 @@ def build_page(idx_param):
     global labels, cmds, flags, items, page_index, key_to_global_item_idx_map, cnt, load_key_idx, up_key_idx, down_key_idx
     key_to_global_item_idx_map.clear()
     if not items: idx_param = 0
-    indexed_items = [(i, item, parse_flags(item['flags'])) for i, item in enumerate(items)]
+
+    indexed_items = []
+    for i, item in enumerate(items):
+        flags_tuple = parse_flags(item['flags'])
+        mon_state = monitor_states.get(i)
+        
+        is_dynamically_sticky = (mon_state == 'OSA_FOUND' and '?' in item.get('flags', ''))
+        
+        if is_dynamically_sticky and not flags_tuple[2]:
+            flags_tuple = (flags_tuple[0], flags_tuple[1], True, *flags_tuple[3:])
+        
+        indexed_items.append((i, item, flags_tuple))
+
     sticky = [p for p in indexed_items if p[2][2]]
     normal = [p for p in indexed_items if not p[2][2]]
     fixed = {load_key_idx, up_key_idx, down_key_idx}
@@ -463,7 +560,7 @@ def redraw():
     if not deck: return
     for i_key in range(cnt):
         f_str_pg, cmd_str_pg, lbl_str_pg = flags.get(i_key,""), cmds.get(i_key,""), labels.get(i_key,"")
-        _, dev_flag_pg, _, bg_pg, fs_pg, _, _ = parse_flags(f_str_pg)
+        _, dev_flag_pg, _, bg_pg, fs_pg, _, _, is_osa_monitor_flag = parse_flags(f_str_pg)
         lbl_render, status_render, vars_render, extra_txt = lbl_str_pg, None, None, None
         bg_render, txt_override_render, flash_this_key_active = bg_pg, None, False
         styled = False; fs_render = fs_pg
@@ -472,10 +569,31 @@ def redraw():
         if g_idx is not None and g_idx < len(items):
             item_dict = items[g_idx]
             item_lbl, item_cmd_db, item_flags_str = item_dict.get('label',''), item_dict.get('command',''), item_dict.get('flags','')
-            _,item_is_at,_,item_orig_bg,item_orig_fs_from_db, _, _ = parse_flags(item_flags_str)
+            _,item_is_at,_,item_orig_bg,item_orig_fs_from_db, _, _, item_is_osa_mon = parse_flags(item_flags_str)
             fs_render = item_orig_fs_from_db
             mon_state = monitor_states.get(g_idx)
-            if item_is_at and '!' in item_flags_str:
+            
+            if item_is_osa_mon:
+                styled = True; lbl_render = item_lbl
+                if mon_state == "OSA_MONITORING":
+                    status_render = "MONITOR..."
+                    bg_render = BASE_COLORS['B']
+                elif mon_state == "OSA_FOUND":
+                    status_render = "FOUND"
+                    bg_render = BASE_COLORS['G'] if not flash_state else dim_color(BASE_COLORS['G'])
+                    flash_this_key_active = True
+                elif mon_state == "OSA_GONE":
+                    status_render = "WIN GONE"
+                    bg_render = BASE_COLORS['E']
+                elif mon_state == "OSA_ERROR":
+                    status_render = "OSA ERROR"
+                    bg_render = BASE_COLORS['R']
+                else:
+                    status_render = "OSA Ready"
+                    bg_render = dim_color(item_orig_bg) if item_orig_bg != BASE_COLORS['K'] else BASE_COLORS['K']
+                txt_override_render = text_color(bg_render)
+
+            elif item_is_at and '!' in item_flags_str:
                 styled=True; lbl_render=item_lbl; bg_render = dim_color(item_orig_bg) if active_device_key!=i_key else toggle_button_bg(item_orig_bg)
                 if mon_state=='connected':
                     status_render="CONNECTED"
@@ -509,7 +627,7 @@ def redraw():
         if not styled and numeric_mode and long_press_numeric_active and numeric_var:
             num_key = numeric_var.get('key')
             if i_key==num_key or i_key==up_key_idx or i_key==down_key_idx:
-                styled=True; lbl_render=lbl_str_pg; _,_,_,num_orig_bg,_,_,_ = parse_flags(flags.get(num_key,"")); bright_num_bg = toggle_button_bg(num_orig_bg)
+                styled=True; lbl_render=lbl_str_pg; _,_,_,num_orig_bg,_,_,_,_ = parse_flags(flags.get(num_key,"")); bright_num_bg = toggle_button_bg(num_orig_bg)
                 bg_render = bright_num_bg if flash_state else (num_orig_bg if i_key==num_key else dim_color(bright_num_bg)); txt_override_render = text_color(bg_render)
                 if i_key==num_key:
                     vars_val = current_session_vars.get(numeric_var['name'])
@@ -518,7 +636,6 @@ def redraw():
                     step = numeric_var.get('step', 1.0)
                     op = "+" if i_key == up_key_idx else "-"
                     step_text = f"{op}{step}"
-                    # --- FIX: Move step text to the top for the down arrow to avoid overlap with "CONFIG" ---
                     if i_key == down_key_idx:
                         status_render = step_text
                     else:
@@ -537,7 +654,7 @@ def start_monitoring():
         if g_idx in monitor_threads: del monitor_threads[g_idx]
     for g_idx, item_data in enumerate(items):
         item_cmd_mon, item_flags_mon = item_data.get('command',''), item_data.get('flags','')
-        _, _, _, _, _, _, item_is_mobile_mon = parse_flags(item_flags_mon)
+        _, _, _, _, _, _, item_is_mobile_mon, _ = parse_flags(item_flags_mon)
         if '!' in item_flags_mon and '@' in item_flags_mon:
             monitor_states.pop(g_idx, None); monitor_states[g_idx] = 'initializing'
             current_gen_id = time.time(); monitor_generations[g_idx] = current_gen_id
@@ -579,14 +696,65 @@ def callback(deck_param, k_idx, pressed):
     if pressed: press_times[k_idx] = time.time(); return
     duration = time.time()-press_times.pop(k_idx,time.time()); lp = duration>=LONG_PRESS_THRESHOLD
     cmd_tpl,flag_str,lbl_str = cmds.get(k_idx,""),flags.get(k_idx,""),labels.get(k_idx,"")
-    nw_cb, dev_cb, _, bg_cb, _, force_local_cb, is_mobile_ssh_cb_page = parse_flags(flag_str)
+    nw_cb, dev_cb, _, bg_cb, _, force_local_cb, is_mobile_ssh_cb_page, is_osa_monitor_cb = parse_flags(flag_str)
     g_idx_cb = key_to_global_item_idx_map.get(k_idx)
+    
+    if g_idx_cb is not None and monitor_states.get(g_idx_cb) == 'OSA_FOUND':
+        print(f"[INFO] Acknowledging and resetting OSA alert for button {k_idx}.")
+        monitor_states[g_idx_cb] = 'OSA_GONE'
+        build_page(page_index)
+        redraw()
+        return
+
     orig_item_cmd_from_db = cmd_tpl; db_monitor_keyword = ""; orig_flags_cb_from_db = flag_str; is_mobile_ssh_cb = is_mobile_ssh_cb_page
     if g_idx_cb is not None and g_idx_cb < len(items):
         item_dict = items[g_idx_cb]
         orig_item_cmd_from_db, orig_flags_cb_from_db, db_monitor_keyword = item_dict.get('command',''), item_dict.get('flags',''), item_dict.get('monitor_keyword','')
-        _,_,_,_,_,_,is_mobile_ssh_cb = parse_flags(orig_flags_cb_from_db)
+        _,_,_,_,_,_,is_mobile_ssh_cb,is_osa_monitor_cb = parse_flags(orig_flags_cb_from_db)
     
+    if is_osa_monitor_cb and not lp:
+        if g_idx_cb in monitor_threads:
+            monitor_generations[g_idx_cb] = None
+            time.sleep(0.1)
+        
+        if db_monitor_keyword.endswith(".0"): keyword = db_monitor_keyword[:-2]
+        else: keyword = db_monitor_keyword
+            
+        if not keyword:
+            monitor_states[g_idx_cb] = 'OSA_ERROR'; redraw(); return
+
+        command_to_run = resolve_command_string(orig_item_cmd_from_db, current_session_vars)
+        style = {"lbl": lbl_str, "bg_hex": bg_cb, "text_color_name": text_color(bg_cb)}
+        result_str = None
+
+        if active_device_key is not None:
+            ssh_cmd = resolve_command_string(cmds.get(active_device_key, ""), current_session_vars)
+            if ssh_cmd:
+                print(f"[INFO] '{lbl_str}' will run on active @-device '{labels.get(active_device_key)}'.")
+                result_str = run_cmd_in_terminal("", btn_style_cfg=style, script_template_override="spawn_ssh_and_snapshot", ssh_cmd_to_keystroke=ssh_cmd, actual_cmd_to_keystroke=command_to_run)
+        else:
+            print(f"[INFO] '{lbl_str}' will run locally (no active @-device).")
+            result_str = run_cmd_in_terminal(command_to_run, btn_style_cfg=style, script_template_override="spawn_and_snapshot")
+
+        if result_str and "::::" in result_str:
+            window_id_str, initial_snapshot = result_str.split("::::", 1)
+            if window_id_str.isdigit():
+                window_id = int(window_id_str)
+                print(f"[INFO] Started OSA Snapshot monitoring for '{lbl_str}' on window ID {window_id} for keyword '{keyword}'.")
+                monitor_states[g_idx_cb] = 'OSA_MONITORING'
+                gen_id = time.time()
+                monitor_generations[g_idx_cb] = gen_id
+                thread = threading.Thread(target=monitor_window_snapshot, args=(g_idx_cb, window_id, initial_snapshot, keyword, gen_id), daemon=True)
+                monitor_threads[g_idx_cb] = thread
+                thread.start()
+            else:
+                monitor_states[g_idx_cb] = 'OSA_ERROR'
+        else:
+            monitor_states[g_idx_cb] = 'OSA_ERROR'
+
+        redraw()
+        return
+
     if k_idx == down_key_idx and lp:
         print("[INFO] Web UI launch requested...")
         if web_ui_process is None or web_ui_process.poll() is not None:
@@ -707,6 +875,8 @@ if __name__ == "__main__":
                         if (mon_state == 'BROKEN' or mon_state == 'PROCESS_BROKEN') and '!' in item_flgs:
                             flash_driver = True; break
                         if mon_state == 'connected' and '!' in item_flgs:
+                            flash_driver = True; break
+                        if mon_state == 'OSA_FOUND' and '?' in item_flgs:
                             flash_driver = True; break
             
             if flash_driver:
