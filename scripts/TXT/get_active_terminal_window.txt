@@ -1,0 +1,18 @@
+--- Creating file: get_active_terminal_window.applescript ---
+
+-- Gets the name of the frontmost window of the Terminal application.
+-- This is used to restore focus after a background task.
+-- Returns the window name or an indicator string if Terminal is not active or has no windows.
+tell application "Terminal"
+    if not (exists window 1) then
+        return "NO_TERMINAL_WINDOW"
+    end if
+    
+    if it is frontmost then
+        return name of window 1
+    else
+        return "TERMINAL_NOT_FRONT"
+    end if
+end tell
+
+--- End of file ---

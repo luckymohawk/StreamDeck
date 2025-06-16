@@ -1,0 +1,21 @@
+-- Executes a command in the default Terminal context.
+-- Placeholders: {{final_script_payload_for_do_script}}
+
+tell application "Terminal"
+	activate
+	if "{{final_script_payload_for_do_script}}" is not "" then
+		if (count windows) is 0 then
+			do script "{{final_script_payload_for_do_script}}"
+		else
+			try
+				do script "{{final_script_payload_for_do_script}}" in selected tab of front window
+			on error
+				try
+					do script "{{final_script_payload_for_do_script}}" in front window
+				on error
+					do script "{{final_script_payload_for_do_script}}"
+				end try
+			end try
+		end if
+	end if
+end tell

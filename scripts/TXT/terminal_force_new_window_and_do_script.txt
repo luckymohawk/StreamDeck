@@ -1,0 +1,35 @@
+-- This script forces a new Terminal window and runs a command.
+set theCommand to "{{final_script_payload_for_do_script}}"
+if theCommand is not "" then
+tell application "Terminal"
+activate
+try
+-- Create a new window by running an empty command.
+set newTerminalContext to do script ""
+delay 0.2
+		
+		if newTerminalContext is missing value then
+			log "Warning: 'do script \"\"' did not return a valid context. Attempting fallback."
+			-- Fallback if context is not returned.
+			do script theCommand
+		else
+			-- Execute the command in the new context.
+			do script theCommand in newTerminalContext
+		end if
+		
+	on error errMsg number errorNumber
+		log "AppleScript Error during K-flag execution: " & errMsg & " (Number: " & errorNumber & ")"
+		-- As a last resort, attempt to run the command without a specific context.
+		try
+			tell application "Terminal"
+				activate
+				do script theCommand
+			end tell
+		on error finalErrMsg
+			log "AppleScript K-flag final fallback also failed: " & finalErrMsg
+		end try
+	end try
+end tell
+else
+log "K-flag: No command provided to AppleScript."
+end if

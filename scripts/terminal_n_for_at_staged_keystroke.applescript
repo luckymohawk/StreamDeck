@@ -1,95 +1,93 @@
--- Purpose: Handles N-button when @-device is active.
--- 1. Creates new window, styled like the active @-device.
--- 2. Keystrokes SSH command of @-device.
--- 3. Delays.
--- 4. Keystrokes N-button's actual command.
+-- Purpose: Handles M-flagged buttons ($ or M) when a non-mobile @-device is active.
+-- NEW: It now intelligently finds an existing, correctly named window or creates one if it's missing.
+-- 1. Search for a window with the custom title.
+-- 2. If FOUND: Activate it and send only the final command (assumes it's already at a prompt).
+-- 3. If NOT FOUND: Create a new window, style it, run the SSH command, wait, then run the final command.
 -- Placeholders:
--- {{window_custom_title}} (from N-button's label, for new window title) - CORRECTED FROM PREVIOUS DOC
--- {{aps_bg_color}} (from @-device style)
--- {{aps_text_color}} (from @-device style)
--- {{ssh_command_to_keystroke}} (e.g., "ssh root@luckyiphone")
--- {{actual_n_command_to_keystroke}} (e.g., "while true; do date ...")
+-- {{window_custom_title}} (e.g., "REC-Mobile")
+-- {{ssh_command_to_keystroke}} (e.g., "ssh mobile@luckyiphone")
+-- {{actual_n_command_to_keystroke}} (The button's specific command)
+-- {{aps_bg_color}}, {{aps_text_color}} (For styling a new window)
 
 tell application "Terminal"
 	activate
-	-- Create a new window. "do script """ should make this new window frontmost.
+	set target_window to missing value
+	set window_was_found to false
+	
+	-- 1. SEARCH for an existing window with the exact custom title.
 	try
-		do script "" 
-	on error err_do_script_empty
-		log "AS: N-for-@ (staged): Critical error on initial 'do script \"\"': " & err_do_script_empty
-		return "AS_ERROR: N-for-@ failed initial 'do script \"\"'."
+		repeat with w in windows
+			if custom title of w is "{{window_custom_title}}" then
+				set target_window to w
+				set window_was_found to true
+				exit repeat
+			end if
+		end repeat
+	on error
+		-- Ignore errors, window_was_found will remain false.
 	end try
 	
-	delay 0.5 -- Allow window to fully form and become front.
-
-	set target_window to missing value
-	if (count windows) > 0 then
-		set target_window to front window -- Assume the new window is now front
-	end if
-
-	if target_window is missing value then
-		log "AS: N-for-@ (staged): Could not determine target window after 'do script \"\"'."
-		return "AS_ERROR: N-for-@ could not get target window"
-	end if
-
-	log "AS: N-for-@ (staged): Styling new window (ID: " & id of target_window & ") as '{{window_custom_title}}'."
-	tell target_window
-		set index to 1 -- Ensure it is absolutely front.
-		delay 0.1
-		set background color to {{aps_bg_color}}
-		set normal text color to {{aps_text_color}}
-		set cursor color to {{aps_text_color}}
-		set bold text color to {{aps_text_color}}
+	-- 2. IF FOUND: Activate it and send the command.
+	if window_was_found then
+		log "AS (Staged): Found existing window '{{window_custom_title}}'. Activating and sending command."
+		
+		tell target_window
+			set index to 1
+			activate
+		end tell
 		delay 0.2
-		set custom title to "{{window_custom_title}}"
-		delay 0.1
-		set custom title to "{{window_custom_title}}" -- Set twice for robustness
-	end tell
-	
-	-- Stage 1: Keystroke SSH command into the new, styled, frontmost window
-	log "AS: N-for-@ (staged): Keystroking SSH command: {{ssh_command_to_keystroke}}"
-	try
-		tell application "System Events"
-			tell process "Terminal" 
-				if not frontmost then
-					log "AS: N-for-@ (staged): Terminal not frontmost before SSH keystroke, activating."
-					tell application "Terminal" to activate
-					delay 0.3
-				end if
+		
+		-- Keystroke ONLY the final command.
+		tell application "System Events" to tell process "Terminal"
+			set frontmost to true
+			if "{{actual_n_command_to_keystroke}}" is not "" then
+				keystroke "{{actual_n_command_to_keystroke}}"
+				keystroke return
+			end if
+		end tell
+		
+	-- 3. IF NOT FOUND: Create a new window using the original logic.
+	else
+		log "AS (Staged): Window '{{window_custom_title}}' not found. Creating and staging new session."
+		
+		try
+			do script ""
+		on error err_do_script_empty
+			return "AS_ERROR: N-for-@ failed initial 'do script \"\"'."
+		end try
+		delay 0.5
+		
+		set new_window to front window
+		tell new_window
+			set index to 1
+			set background color to {{aps_bg_color}}
+			set normal text color to {{aps_text_color}}
+			set cursor color to {{aps_text_color}}
+			set bold text color to {{aps_text_color}}
+			set custom title to "{{window_custom_title}}"
+		end tell
+		
+		-- Stage 1: Keystroke the SSH command.
+		if "{{ssh_command_to_keystroke}}" is not "" then
+			tell application "System Events" to tell process "Terminal"
+				set frontmost to true
+				delay 0.2
 				keystroke "{{ssh_command_to_keystroke}}"
-				delay 0.1
 				keystroke return
 			end tell
-		end tell
-	on error err_ssh_keystroke
-		log "AS: N-for-@ (staged): Error keystroking SSH command: " & err_ssh_keystroke
-		return "AS_ERROR: N-for-@ SSH keystroke failed"
-	end try
-	
-	log "AS: N-for-@ (staged): Delaying for SSH connection..."
-	delay 1.0 -- ADJUSTED DELAY (was 3.0)
-
-	-- Stage 2: Keystroke the N-button's actual command
-	if "{{actual_n_command_to_keystroke}}" is not "" then
-		log "AS: N-for-@ (staged): Keystroking N-command: {{actual_n_command_to_keystroke}}"
-		try
-			tell application "System Events"
-				tell process "Terminal"
-                    if not frontmost then
-                        log "AS: N-for-@ (staged): Terminal not frontmost before N-CMD keystroke, activating."
-                        tell application "Terminal" to activate
-                        delay 0.3
-                    end if
-					keystroke "{{actual_n_command_to_keystroke}}"
-					delay 0.1
-					keystroke return
-				end tell
+		end if
+		
+		-- Wait for SSH to connect.
+		delay 1.5
+		
+		-- Stage 2: Keystroke the final command.
+		if "{{actual_n_command_to_keystroke}}" is not "" then
+			tell application "System Events" to tell process "Terminal"
+				set frontmost to true
+				delay 0.2
+				keystroke "{{actual_n_command_to_keystroke}}"
+				keystroke return
 			end tell
-		on error err_n_cmd_keystroke
-			log "AS: N-for-@ (staged): Error keystroking N-command: " & err_n_cmd_keystroke
-		end try
-	else
-		log "AS: N-for-@ (staged): No N-command to keystroke after SSH."
+		end if
 	end if
-	
 end tell

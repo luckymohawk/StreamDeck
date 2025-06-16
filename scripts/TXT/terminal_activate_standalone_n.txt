@@ -1,0 +1,20 @@
+tell application "Terminal"
+	activate
+	
+	-- Create a new window.
+	set newWindow to do script ""
+	
+	-- Name the window for future access.
+	set custom title of newWindow to "{{window_custom_title}}"
+	
+	-- Set the window's background color.
+	set background color of newWindow to {{aps_bg_color}}
+	
+	-- Set the window's normal text color.
+	set normal text color of newWindow to {{aps_text_color}}
+	
+	delay 0.2
+	
+	-- Run the intended command in the new window.
+	do script "{{final_script_payload_for_do_script}}" in newWindow
+end tell

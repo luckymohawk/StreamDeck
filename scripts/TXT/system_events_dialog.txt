@@ -1,0 +1,26 @@
+-- This script uses the standard 'display dialog' command for input prompts.
+
+try
+	-- Display the dialog.
+	set dialog_result to display dialog "{{prompt_message}}" with title "StreamDeck Input" default answer "{{default_answer}}" buttons {"Cancel", "OK"} default button "OK" with icon 1 giving up after 120
+
+	-- If the user clicked "OK", return the entered text.
+	if button returned of dialog_result is "OK" then
+		return text returned of dialog_result
+	else
+		return "USER_CANCELLED_PROMPT"
+	end if
+
+on error errmsg number errnum
+	-- Handle dialog dismissal.
+	if errnum is -128 then
+		-- User clicked the "Cancel" button.
+		return "USER_CANCELLED_PROMPT"
+	else if errnum is -1712 then
+		-- The dialog timed out.
+		return "USER_TIMEOUT_PROMPT"
+	else
+		-- An unexpected error occurred.
+		return "APPLETSCRIPT_ERROR: " & errmsg & " (" & errnum & ")"
+	end if
+end try

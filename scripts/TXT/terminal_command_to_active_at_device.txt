@@ -1,0 +1,66 @@
+-- Sends a command to an existing, active window using keystrokes.
+-- Placeholders: {{safe_target_title}}, {{command_to_type_literally_content}}, {{main_command_raw_for_emptiness_check}}, {{final_script_payload_for_do_script}}
+
+tell application "Terminal"
+	activate
+	set found_window_ref to missing value
+	set window_was_found to false
+	try
+		repeat with w in windows
+			if custom title of w is "{{safe_target_title}}" then
+				set found_window_ref to w
+				set window_was_found to true
+				exit repeat
+			end if
+		end repeat
+	on error find_err_case4
+		log "AS: Error finding existing window for command to @-device '{{safe_target_title}}': " & find_err_case4
+	end try
+
+	if not window_was_found then
+		log "AS: Target window '{{safe_target_title}}' not found for command. Running in new default window with do script."
+		if "{{final_script_payload_for_do_script}}" is not "" then
+			do script "{{final_script_payload_for_do_script}}"
+		end if
+		return
+	end if
+
+	-- Window was found
+	log "AS: Found window '{{safe_target_title}}' for command. ID: " & (id of found_window_ref as text) & ". Attempting to use KEYSTROKES."
+	
+	try
+		tell found_window_ref
+			activate 
+			set index to 1 
+		end tell
+		delay 0.3 -- Allow window to come to front and settle
+
+		if "{{main_command_raw_for_emptiness_check}}" is not "" then
+            set command_to_actually_type to "{{command_to_type_literally_content}}"
+            
+            log "AS: Sending KEYSTROKES (variable content): " & command_to_actually_type & " to window '{{safe_target_title}}'"
+            
+            tell application "System Events"
+                if not (frontmost of process "Terminal") then
+                    log "AS: Terminal not frontmost, activating it before keystroke."
+                    tell application "Terminal" to activate
+                    delay 0.3 
+                end if
+                
+                keystroke command_to_actually_type 
+                delay 0.1
+                keystroke return
+            end tell
+		else
+			log "AS: No script payload for keystroke to '{{safe_target_title}}'."
+		end if
+        
+	on error keystroke_err
+		log "AS: Error during KEYSTROKE attempt for '{{safe_target_title}}': " & keystroke_err & ". Falling back to 'do script' in NEW window."
+		tell application "Terminal" 
+			if "{{final_script_payload_for_do_script}}" is not "" then
+				do script "{{final_script_payload_for_do_script}}"
+			end if
+		end tell
+	end try
+end tell

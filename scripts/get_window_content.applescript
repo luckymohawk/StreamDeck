@@ -1,5 +1,4 @@
 -- Purpose: Gets window content via clipboard and then returns focus to the original app.
--- This version is robust against having multiple Terminal windows open.
 -- Placeholders: {{window_id}}
 
 -- Remember what app is currently active.
@@ -15,14 +14,10 @@ tell application "Terminal"
 	end if
 	
 	try
-		-- Find our specific window using the ID we passed in.
 		set target_window to first window whose id is {{window_id}}
-		
-		-- THIS IS THE KEY: Bring our specific window to the front of all other Terminal windows.
-		set index of target_window to 1
-		
+		-- No need to bring the window to the front with set index,
+		-- as activating the app and sending keystrokes will handle it.
 	on error
-		-- This will trigger if the window with that ID is closed.
 		set the clipboard to saved_clipboard
 		return "WINDOW_GONE"
 	end try
@@ -32,7 +27,7 @@ end tell
 tell application "System Events"
 	tell process "Terminal"
 		set frontmost to true
-		delay 0.1 -- A brief pause to ensure focus is set.
+		delay 0.1 -- short delay for safety
 		keystroke "a" using command down
 		delay 0.1
 		keystroke "c" using command down
@@ -43,7 +38,7 @@ end tell
 set output to the clipboard
 set the clipboard to saved_clipboard
 
--- IMPORTANT: Return focus to the original application if it wasn't Terminal.
+-- IMPORTANT: Return focus to the original application.
 if front_app_name is not "Terminal" then
 	try
 		tell application front_app_name to activate

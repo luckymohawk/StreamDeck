@@ -1,0 +1,63 @@
+-- This script is for running a command on a remote machine via SSH.
+-- It opens a new styled Terminal window, types the SSH command, waits for login,
+-- then types the actual command to execute. Finally, it returns the window ID and its initial output.
+
+on run argv
+	-- These placeholders are populated by the Python driver
+	set ssh_command to "{{ssh_command_to_keystroke}}"
+	set actual_command to "{{actual_command_to_keystroke}}"
+	set window_title to "{{window_custom_title}}"
+
+	tell application "Terminal"
+		activate
+		
+		-- Run the SSH command in a new window. This establishes the session.
+		do script ssh_command
+		
+		-- Find the new window/tab that was just created.
+		delay 0.5 -- Give Terminal a moment to create the window.
+		
+		set new_window to missing value
+		try
+			-- Find the most recently active window that isn't busy
+			repeat with w in windows
+				if (busy of w is false) then
+					set new_window to w
+					exit repeat
+				end if
+			end repeat
+		end try
+		
+		if new_window is missing value then
+			set new_window to front window -- Fallback
+		end if
+		
+		tell new_window
+			set custom title to window_title
+			set background color to {{aps_bg_color}}
+			set normal text color to {{aps_text_color}}
+			set bold text color to {{aps_text_color}}
+			
+			-- Wait for the SSH login process to complete.
+			repeat until busy is false
+				delay 0.3
+			end repeat
+			
+			tell application "System Events"
+				keystroke actual_command & return
+			end tell
+			
+			-- Wait for the remote command to finish and the prompt to reappear.
+			repeat until busy of new_window is false
+				delay 0.2
+			end repeat
+			
+			-- Get the window ID and its content after the command has run.
+			set window_id to id of it
+			set window_content to contents of selected tab of it
+			
+			-- Return the data for the Python monitor thread.
+			return (window_id as text) & "::::" & window_content
+		end tell
+	end tell
+end run

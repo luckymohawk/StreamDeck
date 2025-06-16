@@ -1,0 +1,50 @@
+-- This script opens a new Terminal window with a custom title and profile,
+-- runs an initial command, and then returns the new window's ID and its initial content.
+
+on run argv
+    -- The command to run is passed as an argument from the calling script
+    set initial_command to "{{initial_command_to_run}}"
+    set window_title to "{{window_custom_title}}"
+    
+    tell application "Terminal"
+        activate
+        
+        -- Create a new window by running a command.
+        do script initial_command
+        
+        -- Find the new window/tab that was just created.
+        delay 0.5 -- Give Terminal a moment to create the window and run the script
+        
+        set new_window to missing value
+        repeat with w in windows
+            if (busy of w is false) then
+                set new_window to w
+                exit repeat
+            end if
+        end repeat
+
+        if new_window is missing value then
+            -- Fallback if the above logic fails
+            set new_window to front window
+        end if
+        
+        tell new_window
+            set custom title to window_title
+            set background color to {{aps_bg_color}}
+            set normal text color to {{aps_text_color}}
+            set bold text color to {{aps_text_color}}
+            
+            -- Wait for the initial command to finish and the prompt to appear
+            repeat until busy is false
+                delay 0.2
+            end repeat
+            
+            -- Get the window ID and its content
+            set window_id to id of it
+            set window_content to contents of selected tab of it
+            
+            -- Return a unique string that Python can parse
+            return (window_id as text) & "::::" & window_content
+        end tell
+    end tell
+end run
