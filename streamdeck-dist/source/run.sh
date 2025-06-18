@@ -16,6 +16,6 @@ osascript <<EOF
 tell application "Terminal"
     reopen
     activate
-    do script "'$DIR/$REAL_EXECUTABLE'"
+    do script "cd \"$DIR\" && './$REAL_EXECUTABLE'"
 end tell
 EOF
