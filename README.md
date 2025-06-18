@@ -1,5 +1,4 @@
 
-Markdown
 # StreamDeck Commander
 
 A macOS utility for managing Elgato Stream Deck buttons and automations.
