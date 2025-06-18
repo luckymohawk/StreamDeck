@@ -1,0 +1,4 @@
+streamdeck
+Pillow
+Flask
+Flask-CORS
