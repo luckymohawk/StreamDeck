@@ -7,7 +7,9 @@ a = Analysis(
     datas=[
         ('source/scripts', 'scripts'),
         ('browsebuttons/dist', 'browsebuttons/dist'),
-        ('source/run.sh', '.')
+        # Place the launcher directly inside the MacOS directory so
+        # it can be used as the bundle's CFBundleExecutable.
+        ('source/run.sh', 'MacOS/run.sh')
     ],
     hiddenimports=[
         'flask', 
