@@ -29,6 +29,7 @@ A macOS utility for managing Elgato Stream Deck buttons and automations.
     This will:
     - Copy all necessary files to `~/Library/StreamdeckDriver`
     - Set up a Python virtual environment and install dependencies
+      (or use the bundled environment if present)
     - Set permissions on launchers
 
 ## Running the App
@@ -37,36 +38,31 @@ After installation, launch the app with:
 
 ```sh
 open ~/Library/StreamdeckDriver/StreamDeckCommander.command
-Or double-click StreamDeckCommander.command in Finder.
+```
 
-Packaging a DMG (Optional)
+Or double-click `StreamDeckCommander.command` in Finder.
 
-To distribute as a DMG:
+## Packaging a DMG
 
-Install create-dmg (or use Disk Utility).
+The `package_dmg.sh` script builds a DMG containing a pre-built Python
+environment. `create-dmg` must be available on your system.
 
-Copy these items into a packaging directory:
+```sh
+./package_dmg.sh
+```
 
-StreamDeckCommander.command
-All Python files
-The scripts/ directory (except scripts/OLD and scripts/TXT)
-requirements.txt
-install_streamdeck.sh
-Any icons or assets needed
-Exclude: .venv/, .DS_Store, .git/, and any development folders.
+The resulting `StreamDeckCommander.dmg` can be distributed to other Macs.
 
-Run (with create-dmg):
+## Uninstall
 
-sh
-create-dmg --volname "StreamDeckCommander" --window-pos 200 120 --window-size 800 400 --icon-size 100 --app-drop-link 600 185 ./StreamDeckCommander.dmg ./your_packaging_directory
-Or use Disk Utility to create a disk image from your folder.
+Run the provided script to remove all installed files:
 
-Uninstall
+```sh
+./uninstall_streamdeck.sh
+```
 
-Remove everything by deleting the folder:
+This simply deletes `~/Library/StreamdeckDriver`.
 
-sh
-rm -rf ~/Library/StreamdeckDriver
-Contributing
+## Contributing
 
 Pull requests and issues are welcome!
