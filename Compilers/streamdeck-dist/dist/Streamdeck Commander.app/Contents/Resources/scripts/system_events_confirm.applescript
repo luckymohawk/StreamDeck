@@ -1,0 +1,14 @@
+-- This script displays a confirmation dialog with Yes/No buttons.
+-- It returns "YES_CONFIRMED" on stdout only if "Yes" is clicked.
+
+try
+	tell application "System Events"
+		activate
+		display dialog "{{prompt_message}}" with title "Confirm Action" buttons {"No", "Yes"} default button "Yes" cancel button "No" with icon caution
+	end tell
+	-- If the script continues, the user clicked "Yes".
+	return "YES_CONFIRMED"
+on error errmsg number errnum
+	-- Any other action (clicking "No", pressing escape, timeout) is a cancellation.
+	return "USER_CANCELLED"
+end try

@@ -1,0 +1,21 @@
+{
+  "description": "A macOS application to control a Stream Deck.",
+  "prompt": "A macOS app that controls a streamdeck ",
+  "requestFramePermissions": [],
+  "name": "App"
+}
+```---
+### **File: `README.md`**
+```markdown
+# App
+
+This contains everything you need to run your app locally.
+
+## Run Locally
+
+**Prerequisites:**  Node.js
+
+1. Install dependencies:
+   `npm install`
+2. Run the app:
+   `npm run dev`
