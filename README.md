@@ -52,6 +52,8 @@ environment. `create-dmg` must be available on your system.
 ```
 
 The resulting `StreamDeckCommander.dmg` can be distributed to other Macs.
+After opening the DMG, double-click `install_streamdeck.sh` to copy
+all required files to `~/Library/StreamdeckDriver`.
 
 ## Uninstall
 
