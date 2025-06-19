@@ -24,7 +24,11 @@ cd ../..
 
 # Create the DMG (requires create-dmg)
 if command -v create-dmg >/dev/null 2>&1; then
-    create-dmg --volname "StreamDeckCommander" --window-pos 200 120 --window-size 800 400 --icon-size 100 --app-drop-link 600 185 "$DMG_NAME" "$PKG_DIR"
+    # Generate a basic DMG with our installer folder. Users simply run the
+    # included install_streamdeck.sh script after mounting.
+    create-dmg --volname "StreamDeckCommander" --window-pos 200 120 \
+               --window-size 800 400 --icon-size 100 \
+               "$DMG_NAME" "$PKG_DIR"
 else
     echo "create-dmg not found. Install it or build the DMG manually."
 fi
